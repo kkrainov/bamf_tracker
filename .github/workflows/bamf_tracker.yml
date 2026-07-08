@@ -1,0 +1,59 @@
+name: Daily BAMF Status Tracker
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # Runs every day at 06:00 UTC
+  workflow_dispatch: # Allows manual triggering from the UI
+
+permissions:
+  contents: write
+  issues: write  # REQUIRED: Allows the bot to open issues
+
+jobs:
+  track-bamf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        # Dropped pandas/html5lib, added beautifulsoup4
+        run: pip install requests beautifulsoup4
+
+      - name: Run Scraper
+        run: python scraper.py
+
+      - name: Check for Changes
+        id: check_changes
+        run: |
+          if [ -f changes.txt ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify via GitHub Issue
+        if: steps.check_changes.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "BAMF Update: Test Evaluation Status" \
+            --body-file changes.txt \
+            --assignee ${{ github.actor }}
+
+      - name: Commit Data
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config --global user.name "BAMF-Bot"
+          git config --global user.email "bot@noreply.github.com"
+          
+          # Only add the status file, ignoring changes.txt
+          git add bamf_status.txt
+          git commit -m "Update BAMF status: $(date +'%Y-%m-%d')" || exit 0
+          git push
